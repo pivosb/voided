@@ -1,0 +1,17 @@
+name: voided
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pandas
+  - numpy
+  - matplotlib
+  - scikit-learn          # calibração: brier_score_loss, calibration_curve
+  - pytest
+  - jupyterlab
+  - pip
+  - pip:
+      - pydantic>=2.7
+      - python-dotenv
+      - tenacity           # retry com backoff no cliente LLM
+      - anthropic          # trocar/adicionar conforme o provedor usado
