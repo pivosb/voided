@@ -10,6 +10,7 @@ from src.schemas import (
     ResultadoValidacao,
     Severidade,
     SolicitacaoBruta,
+    CanalTransacao,
     Transacao,
 )
 from src.steps.validate import (
@@ -27,7 +28,7 @@ def _transacao(
     data_hora: datetime | None = None,
     valor: str = "100.00",
     estabelecimento: str = "LOJA A",
-    canal_transacao: str = "online",
+    canal_transacao: CanalTransacao = "online",
     ja_estornada: bool = False,
 ) -> Transacao:
     return Transacao(

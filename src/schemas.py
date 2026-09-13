@@ -81,6 +81,7 @@ class Severidade(str, Enum):
 # Etapa 1 -- Coleta
 # --------------------------------------------------------------------------- #
 
+CanalTransacao = Literal["presencial", "online", "recorrente", "saque"]
 
 class Transacao(Base):
     """Dado estruturado vindo da API interna de cartoes. Nunca passa pelo LLM
@@ -91,7 +92,7 @@ class Transacao(Base):
     valor: Valor
     estabelecimento: str
     mcc: str = Field(pattern=r"^\d{4}$", description="Merchant Category Code")
-    canal_transacao: Literal["presencial", "online", "recorrente", "saque"]
+    canal_transacao: CanalTransacao
     pais: str = Field(min_length=2, max_length=2)
     ja_estornada: bool = False
 
