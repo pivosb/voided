@@ -3,10 +3,13 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 from src.schemas import (
     CanalEntrada,
     ExtracaoContestacao,
     MotivoContestacao,
+    RegraViolacao,
     ResultadoValidacao,
     Severidade,
     SolicitacaoBruta,
@@ -76,7 +79,7 @@ def _extracao(
     )
 
 
-def _regras(resultado: ResultadoValidacao) -> set[str]:
+def _regras(resultado: ResultadoValidacao) -> set[RegraViolacao]:
     return {v.regra for v in resultado.violacoes}
 
 
@@ -102,7 +105,7 @@ def test_um_dia_apos_o_prazo_bloqueia():
     resultado = validar(_solicitacao([_transacao(data_hora=data_hora)]), _extracao())
 
     assert not resultado.elegivel
-    assert _regras(resultado) == {"prazo_expirado"}
+    assert _regras(resultado) == {RegraViolacao.PRAZO_EXPIRADO}
 
 
 def test_hora_do_dia_nao_consome_prazo():
@@ -131,7 +134,7 @@ def test_primeira_hora_do_dia_seguinte_ao_prazo_bloqueia():
     )
 
     assert not resultado.elegivel
-    assert _regras(resultado) == {"prazo_expirado"}
+    assert _regras(resultado) == {RegraViolacao.PRAZO_EXPIRADO}
 
 
 def test_dia_da_transacao_e_periodo_de_graca():
@@ -149,7 +152,7 @@ def test_data_futura_alerta_sem_bloquear():
     resultado = validar(_solicitacao([_transacao(data_hora=data_hora)]), _extracao())
 
     assert resultado.elegivel
-    assert _regras(resultado) == {"data_transacao_futura"}
+    assert _regras(resultado) == {RegraViolacao.DATA_TRANSACAO_FUTURA}
     assert resultado.violacoes[0].severidade is Severidade.ALERTA
 
 
@@ -157,7 +160,7 @@ def test_transacao_ja_estornada_bloqueia():
     resultado = validar(_solicitacao([_transacao(ja_estornada=True)]), _extracao())
 
     assert not resultado.elegivel
-    assert _regras(resultado) == {"transacao_ja_estornada"}
+    assert _regras(resultado) == {RegraViolacao.TRANSACAO_JA_ESTORNADA}
 
 
 def test_duplicidade_com_par_no_periodo_e_elegivel():
@@ -180,7 +183,7 @@ def test_duplicidade_sem_par_bloqueia():
     )
 
     assert not resultado.elegivel
-    assert _regras(resultado) == {"duplicidade_nao_confirmada"}
+    assert _regras(resultado) == {RegraViolacao.DUPLICIDADE_NAO_CONFIRMADA}
 
 
 def test_par_duplicado_no_limite_da_janela_conta():
@@ -211,7 +214,7 @@ def test_par_duplicado_fora_da_janela_nao_conta():
     )
 
     assert not resultado.elegivel
-    assert _regras(resultado) == {"duplicidade_nao_confirmada"}
+    assert _regras(resultado) == {RegraViolacao.DUPLICIDADE_NAO_CONFIRMADA}
 
 
 def test_id_citado_fora_do_periodo_bloqueia():
@@ -219,7 +222,7 @@ def test_id_citado_fora_do_periodo_bloqueia():
 
     assert not resultado.elegivel
     assert resultado.transacoes_confirmadas == []
-    assert _regras(resultado) == {"transacao_nao_encontrada"}
+    assert _regras(resultado) == {RegraViolacao.TRANSACAO_NAO_ENCONTRADA}
     assert "TX9" in resultado.violacoes[0].detalhe
 
 
@@ -227,7 +230,7 @@ def test_sem_id_citado_bloqueia():
     resultado = validar(_solicitacao(), _extracao(ids_transacoes_citadas=()))
 
     assert not resultado.elegivel
-    assert _regras(resultado) == {"sem_transacao_citada"}
+    assert _regras(resultado) == {RegraViolacao.SEM_TRANSACAO_CITADA}
 
 
 def test_id_citado_repetido_nao_dobra_a_confirmacao():
@@ -236,23 +239,46 @@ def test_id_citado_repetido_nao_dobra_a_confirmacao():
     assert resultado.transacoes_confirmadas == ["TX1"]
 
 
-def test_valor_alegado_diferente_bloqueia():
+def test_valor_alegado_diferente_alerta_sem_bloquear():
     resultado = validar(_solicitacao(), _extracao(valor_alegado=Decimal("250.00")))
 
-    assert not resultado.elegivel
-    assert _regras(resultado) == {"valor_alegado_divergente"}
+    assert resultado.elegivel
+    assert _regras(resultado) == {RegraViolacao.VALOR_ALEGADO_DIVERGENTE}
+    assert resultado.violacoes[0].severidade is Severidade.ALERTA
 
 
-def test_valor_alegado_diferente_e_esperado_quando_o_motivo_e_valor_divergente():
+def test_valor_alegado_igual_a_soma_nao_alerta():
+    resultado = validar(_solicitacao(), _extracao(valor_alegado=Decimal("100.00")))
+
+    assert resultado.violacoes == []
+
+
+@pytest.mark.parametrize("valor_devido", ["80.00", "99.99"])
+def test_valor_divergente_com_devido_menor_que_o_cobrado_e_elegivel(valor_devido):
     resultado = validar(
         _solicitacao(),
         _extracao(
-            motivo=MotivoContestacao.VALOR_DIVERGENTE, valor_alegado=Decimal("250.00")
+            motivo=MotivoContestacao.VALOR_DIVERGENTE,
+            valor_alegado=Decimal(valor_devido),
         ),
     )
 
     assert resultado.elegivel
     assert resultado.violacoes == []
+
+
+@pytest.mark.parametrize("valor_devido", ["100.00", "100.01", None])
+def test_valor_divergente_sem_cobranca_a_maior_bloqueia(valor_devido):
+    resultado = validar(
+        _solicitacao(),
+        _extracao(
+            motivo=MotivoContestacao.VALOR_DIVERGENTE,
+            valor_alegado=Decimal(valor_devido) if valor_devido is not None else None,
+        ),
+    )
+
+    assert not resultado.elegivel
+    assert _regras(resultado) == {RegraViolacao.ESTORNO_PARCIAL_SEM_BASE}
 
 
 def test_motivo_indeterminado_bloqueia():
@@ -262,7 +288,7 @@ def test_motivo_indeterminado_bloqueia():
     )
 
     assert not resultado.elegivel
-    assert _regras(resultado) == {"motivo_indeterminado"}
+    assert _regras(resultado) == {RegraViolacao.MOTIVO_INDETERMINADO}
 
 
 def test_transacao_presencial_contra_relato_de_nao_reconhecimento_alerta():
@@ -271,7 +297,7 @@ def test_transacao_presencial_contra_relato_de_nao_reconhecimento_alerta():
     )
 
     assert resultado.elegivel
-    assert _regras(resultado) == {"cartao_presente_vs_nao_reconhecimento"}
+    assert _regras(resultado) == {RegraViolacao.CARTAO_PRESENTE_VS_NAO_RECONHECIMENTO}
 
 
 def test_reincidencia_alerta_sem_bloquear():
@@ -280,7 +306,7 @@ def test_reincidencia_alerta_sem_bloquear():
     )
 
     assert resultado.elegivel
-    assert _regras(resultado) == {"reincidencia_contestacoes"}
+    assert _regras(resultado) == {RegraViolacao.REINCIDENCIA_CONTESTACOES}
 
 
 def test_violacoes_se_acumulam():
@@ -291,4 +317,7 @@ def test_violacoes_se_acumulam():
     )
 
     assert not resultado.elegivel
-    assert _regras(resultado) == {"prazo_expirado", "transacao_ja_estornada"}
+    assert _regras(resultado) == {
+        RegraViolacao.PRAZO_EXPIRADO,
+        RegraViolacao.TRANSACAO_JA_ESTORNADA,
+    }

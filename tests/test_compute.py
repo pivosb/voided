@@ -9,6 +9,7 @@ from src.schemas import (
     CanalEntrada,
     ExtracaoContestacao,
     MotivoContestacao,
+    RegraViolacao,
     ResultadoCalculo,
     ResultadoValidacao,
     Severidade,
@@ -23,7 +24,6 @@ from src.steps.compute import (
     calcular,
     quantizar_centavos,
 )
-from src.steps.validate import LIMITE_CONTESTACOES_12M, validar
 
 RECEBIDA_EM = datetime(2026, 6, 1, 12, 0)
 
@@ -81,7 +81,7 @@ def _extracao(
 
 
 def _validacao(
-    ids: list[str], elegivel: bool = True, alertas: tuple[str, ...] = ()
+    ids: list[str], elegivel: bool = True, alertas: tuple[RegraViolacao, ...] = ()
 ) -> ResultadoValidacao:
     return ResultadoValidacao(
         elegivel=elegivel,
@@ -97,7 +97,7 @@ def _calcular(
     transacoes: list[Transacao],
     motivo: MotivoContestacao = MotivoContestacao.NAO_RECONHECIDA,
     valor_alegado: str | None = None,
-    alertas: tuple[str, ...] = (),
+    alertas: tuple[RegraViolacao, ...] = (),
     canal: CanalEntrada = CanalEntrada.APP,
 ) -> ResultadoCalculo:
     ids = [t.id_transacao for t in transacoes]
@@ -242,24 +242,18 @@ def test_alerta_de_risco_alto_eleva_a_faixa_mesmo_com_valor_baixo(alerta):
     resultado = _calcular(_transacoes("10.00"), alertas=(alerta,))
 
     assert resultado.faixa_risco == "alta"
+    assert resultado.memoria_calculo[-3] == (
+        f"Faixa alta: alerta {alerta.value}; segue para analise humana"
+    )
 
 
 def test_demais_alertas_levam_a_faixa_media():
-    resultado = _calcular(_transacoes("10.00"), alertas=("data_transacao_futura",))
+    alerta = RegraViolacao.DATA_TRANSACAO_FUTURA
+
+    resultado = _calcular(_transacoes("10.00"), alertas=(alerta,))
 
     assert resultado.faixa_risco == "media"
-
-
-def test_nomes_de_alerta_de_risco_alto_existem_no_validate():
-    # O compute nao importa o validate; este teste e' o que pega renomeacao.
-    transacoes = [_transacao(canal_transacao="presencial")]
-    solicitacao = _solicitacao(
-        transacoes, contestacoes_ultimos_12m=LIMITE_CONTESTACOES_12M + 1
-    )
-
-    validacao = validar(solicitacao, _extracao(["TX1"]))
-
-    assert ALERTAS_DE_RISCO_ALTO <= {v.regra for v in validacao.violacoes}
+    assert resultado.memoria_calculo[-3] == f"Faixa media: alerta {alerta.value}"
 
 
 @pytest.mark.parametrize("canal", list(CanalEntrada))

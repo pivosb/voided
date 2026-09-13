@@ -18,6 +18,7 @@ from decimal import Decimal
 from src.schemas import (
     ExtracaoContestacao,
     MotivoContestacao,
+    RegraViolacao,
     ResultadoValidacao,
     Severidade,
     SolicitacaoBruta,
@@ -54,6 +55,7 @@ def validar(
     violacoes += _regra_ja_estornada(confirmadas)
     violacoes += _regra_duplicidade(solicitacao, extracao)
     violacoes += _regra_valor_alegado(extracao, confirmadas)
+    violacoes += _regra_estorno_parcial_sem_base(extracao, confirmadas)
     violacoes += _regra_motivo_indeterminado(extracao)
     violacoes += _regra_cartao_presente(extracao, confirmadas)
     violacoes += _regra_reincidencia(solicitacao)
@@ -74,7 +76,7 @@ def _resolver_transacoes(
     if not extracao.ids_transacoes_citadas:
         return [], [
             Violacao(
-                regra="sem_transacao_citada",
+                regra=RegraViolacao.SEM_TRANSACAO_CITADA,
                 severidade=Severidade.BLOQUEANTE,
                 detalhe="A extracao nao citou nenhuma transacao; nao ha o que contestar.",
             )
@@ -91,7 +93,7 @@ def _resolver_transacoes(
         if transacao is None:
             violacoes.append(
                 Violacao(
-                    regra="transacao_nao_encontrada",
+                    regra=RegraViolacao.TRANSACAO_NAO_ENCONTRADA,
                     severidade=Severidade.BLOQUEANTE,
                     detalhe=f"Transacao {id_citado} nao consta no periodo consultado.",
                 )
@@ -115,7 +117,7 @@ def _regra_prazo(
         if dias > PRAZO_CONTESTACAO_DIAS:
             violacoes.append(
                 Violacao(
-                    regra="prazo_expirado",
+                    regra=RegraViolacao.PRAZO_EXPIRADO,
                     severidade=Severidade.BLOQUEANTE,
                     detalhe=(
                         f"Transacao {transacao.id_transacao}: {dias} dias decorridos, "
@@ -126,7 +128,7 @@ def _regra_prazo(
         elif dias < 0:
             violacoes.append(
                 Violacao(
-                    regra="data_transacao_futura",
+                    regra=RegraViolacao.DATA_TRANSACAO_FUTURA,
                     severidade=Severidade.ALERTA,
                     detalhe=(
                         f"Transacao {transacao.id_transacao} datada {abs(dias)} dia(s) "
@@ -141,7 +143,7 @@ def _regra_prazo(
 def _regra_ja_estornada(confirmadas: list[Transacao]) -> list[Violacao]:
     return [
         Violacao(
-            regra="transacao_ja_estornada",
+            regra=RegraViolacao.TRANSACAO_JA_ESTORNADA,
             severidade=Severidade.BLOQUEANTE,
             detalhe=f"Transacao {t.id_transacao} ja possui estorno registrado.",
         )
@@ -161,7 +163,7 @@ def _regra_duplicidade(
 
     return [
         Violacao(
-            regra="duplicidade_nao_confirmada",
+            regra=RegraViolacao.DUPLICIDADE_NAO_CONFIRMADA,
             severidade=Severidade.BLOQUEANTE,
             detalhe=(
                 "Cliente alega cobranca em duplicidade, mas o periodo nao tem duas "
@@ -200,14 +202,44 @@ def _regra_valor_alegado(
     if extracao.valor_alegado == total:
         return []
 
+    # Alerta, nao bloqueio: o estorno sai da soma das confirmadas, entao o valor
+    # citado errado nao altera o dinheiro devolvido.
     return [
         Violacao(
-            regra="valor_alegado_divergente",
-            severidade=Severidade.BLOQUEANTE,
+            regra=RegraViolacao.VALOR_ALEGADO_DIVERGENTE,
+            severidade=Severidade.ALERTA,
             detalhe=(
                 f"Cliente alega {extracao.valor_alegado}, transacoes confirmadas "
                 f"somam {total}."
             ),
+        )
+    ]
+
+
+def _regra_estorno_parcial_sem_base(
+    extracao: ExtracaoContestacao, confirmadas: list[Transacao]
+) -> list[Violacao]:
+    if extracao.motivo is not MotivoContestacao.VALOR_DIVERGENTE or not confirmadas:
+        return []
+
+    if extracao.valor_alegado is None:
+        detalhe = (
+            "Motivo valor_divergente sem valor alegado: nao ha base para estorno parcial."
+        )
+    else:
+        cobrado = sum((t.valor for t in confirmadas), Decimal("0"))
+        if extracao.valor_alegado < cobrado:
+            return []
+        detalhe = (
+            f"Valor devido {extracao.valor_alegado} nao e' menor que o cobrado "
+            f"{cobrado}: nao ha cobranca a maior."
+        )
+
+    return [
+        Violacao(
+            regra=RegraViolacao.ESTORNO_PARCIAL_SEM_BASE,
+            severidade=Severidade.BLOQUEANTE,
+            detalhe=detalhe,
         )
     ]
 
@@ -218,7 +250,7 @@ def _regra_motivo_indeterminado(extracao: ExtracaoContestacao) -> list[Violacao]
 
     return [
         Violacao(
-            regra="motivo_indeterminado",
+            regra=RegraViolacao.MOTIVO_INDETERMINADO,
             severidade=Severidade.BLOQUEANTE,
             detalhe="Motivo nao determinado na extracao; caso exige analise humana.",
         )
@@ -233,7 +265,7 @@ def _regra_cartao_presente(
 
     return [
         Violacao(
-            regra="cartao_presente_vs_nao_reconhecimento",
+            regra=RegraViolacao.CARTAO_PRESENTE_VS_NAO_RECONHECIMENTO,
             severidade=Severidade.ALERTA,
             detalhe=(
                 f"Transacao {t.id_transacao} foi presencial, o que contradiz o relato "
@@ -251,7 +283,7 @@ def _regra_reincidencia(solicitacao: SolicitacaoBruta) -> list[Violacao]:
 
     return [
         Violacao(
-            regra="reincidencia_contestacoes",
+            regra=RegraViolacao.REINCIDENCIA_CONTESTACOES,
             severidade=Severidade.ALERTA,
             detalhe=(
                 f"{solicitacao.contestacoes_ultimos_12m} contestacoes nos ultimos 12 "

@@ -27,6 +27,7 @@ from typing import Literal
 from src.schemas import (
     ExtracaoContestacao,
     MotivoContestacao,
+    RegraViolacao,
     ResultadoCalculo,
     ResultadoValidacao,
     Severidade,
@@ -41,10 +42,11 @@ ARREDONDAMENTO = ROUND_HALF_EVEN
 # define a provisao final.
 LIMITE_ESTORNO_AUTOMATICO = Decimal("1000.00")
 
-# Nomes das regras de alerta de src/steps/validate.py que, sozinhas, levam o caso
-# para a faixa alta. Strings em vez de import porque etapas nao se importam.
 ALERTAS_DE_RISCO_ALTO = frozenset(
-    {"cartao_presente_vs_nao_reconhecimento", "reincidencia_contestacoes"}
+    {
+        RegraViolacao.CARTAO_PRESENTE_VS_NAO_RECONHECIMENTO,
+        RegraViolacao.REINCIDENCIA_CONTESTACOES,
+    }
 )
 
 PRAZO_RESPOSTA_DIAS_UTEIS = 5
@@ -159,7 +161,9 @@ def _faixa_risco(
         v.regra for v in validacao.violacoes if v.severidade is Severidade.ALERTA
     ]
 
-    motivos_alta = [f"alerta {r}" for r in alertas if r in ALERTAS_DE_RISCO_ALTO]
+    motivos_alta = [
+        f"alerta {r.value}" for r in alertas if r in ALERTAS_DE_RISCO_ALTO
+    ]
     if acima_do_limite:
         motivos_alta.insert(
             0,
@@ -173,7 +177,7 @@ def _faixa_risco(
         )
 
     if alertas:
-        return "media", f"Faixa media: alerta {', '.join(alertas)}"
+        return "media", f"Faixa media: alerta {', '.join(r.value for r in alertas)}"
 
     return "baixa", (
         "Faixa baixa: sem alerta e estorno dentro do limite de "

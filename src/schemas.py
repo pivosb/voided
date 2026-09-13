@@ -77,6 +77,23 @@ class Severidade(str, Enum):
     INFO = "info"
 
 
+class RegraViolacao(str, Enum):
+    """Nomes das regras de src/steps/validate.py. O gabarito sintetico
+    (scripts/gen_specs.py) usa os mesmos, para as violacoes serem comparaveis."""
+
+    SEM_TRANSACAO_CITADA = "sem_transacao_citada"
+    TRANSACAO_NAO_ENCONTRADA = "transacao_nao_encontrada"
+    PRAZO_EXPIRADO = "prazo_expirado"
+    DATA_TRANSACAO_FUTURA = "data_transacao_futura"
+    TRANSACAO_JA_ESTORNADA = "transacao_ja_estornada"
+    DUPLICIDADE_NAO_CONFIRMADA = "duplicidade_nao_confirmada"
+    VALOR_ALEGADO_DIVERGENTE = "valor_alegado_divergente"
+    ESTORNO_PARCIAL_SEM_BASE = "estorno_parcial_sem_base"
+    MOTIVO_INDETERMINADO = "motivo_indeterminado"
+    CARTAO_PRESENTE_VS_NAO_RECONHECIMENTO = "cartao_presente_vs_nao_reconhecimento"
+    REINCIDENCIA_CONTESTACOES = "reincidencia_contestacoes"
+
+
 # --------------------------------------------------------------------------- #
 # Etapa 1 -- Coleta
 # --------------------------------------------------------------------------- #
@@ -155,7 +172,7 @@ class ExtracaoContestacao(Base):
 
 
 class Violacao(Base):
-    regra: str
+    regra: RegraViolacao
     severidade: Severidade
     detalhe: str
 
