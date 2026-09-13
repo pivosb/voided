@@ -282,11 +282,16 @@ class EventoExecucao(Base):
 
 
 class CasoDourado(Base):
-    """Caso historico ja' decidido por analista. Split temporal, nao aleatorio."""
+    """Rotulo de referencia: caso historico decidido por analista, ou caso
+    sintetico com gabarito construido (scripts/build_golden.py). Split temporal,
+    nao aleatorio."""
 
     id_caso: str
     decidido_em: date
     motivo_humano: MotivoContestacao
     elegivel_humano: bool
     valor_estorno_humano: Valor
+    # Sem default: lista vazia tem que ser "sem violacao", nunca "nao registrado".
+    violacoes_humano: list[RegraViolacao]
+    faixa_risco_humano: Literal["baixa", "media", "alta"] | None  # None se nao elegivel
     observacao_analista: str | None = None
