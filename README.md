@@ -10,7 +10,7 @@ coleta da solicitação, validação de elegibilidade, cálculo do estorno e reg
 ```bash
 mamba env create -f environment.yml
 mamba activate voided
-python run.py --mock --n 100        # execução completa, sem chave de API
+python run.py --mock --limit 100    # execução completa, sem chave de API
 pytest -q                           # testes das regras e do cálculo
 jupyter lab notebooks/analise.ipynb # métricas e decisões
 ```
