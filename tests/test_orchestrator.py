@@ -18,6 +18,7 @@ from src.schemas import (
     TierModelo,
     Transacao,
 )
+from src.steps.extract import PROMPT_VERSION
 
 RECEBIDA = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
 
@@ -71,15 +72,18 @@ def _falha_schema(tier: TierModelo) -> FalhaSchema:
 def _extrator_falso(monkeypatch, respostas: dict[TierModelo, object]):
     """Resposta por tier: ExtracaoContestacao devolve, excecao levanta."""
     tiers = []
+    versoes = []
 
-    def falso(solicitacao, tier):
+    def falso(solicitacao, tier, prompt_version):
         tiers.append(tier)
+        versoes.append(prompt_version)
         resposta = respostas[tier]
         if isinstance(resposta, Exception):
             raise resposta
         return resposta, _custo(tier)
 
     monkeypatch.setattr(orchestrator, "extrair", falso)
+    falso.versoes = versoes
     return tiers
 
 
@@ -96,7 +100,7 @@ def test_caminho_feliz_e_automatico(monkeypatch):
     assert [r.tier for r in evento.rotas] == [TierModelo.PEQUENO] * 3
     assert len(evento.custos) == 1
     assert evento.erro is None
-    assert evento.versao_prompt == "extract_v1"
+    assert evento.versao_prompt == PROMPT_VERSION == "extract_v2"
 
 
 def test_falha_de_schema_sobe_de_tier_e_guarda_o_custo_da_falha(monkeypatch):
@@ -180,3 +184,13 @@ def test_erro_depois_da_extracao_preserva_o_que_ja_foi_produzido(monkeypatch):
     assert evento.erro == "calculo: ValueError: calculo impossivel"
     assert evento.extracao is not None and evento.validacao is not None
     assert len(evento.custos) == 1
+
+
+def test_versao_do_prompt_vai_para_a_extracao_e_para_o_evento(monkeypatch):
+    tiers = _extrator_falso(monkeypatch, {TierModelo.PEQUENO: _extracao()})
+
+    evento = orchestrator.processar_caso(SOLICITACAO, prompt_version="extract_v1")
+
+    assert orchestrator.extrair.versoes == ["extract_v1"]
+    assert evento.versao_prompt == "extract_v1"
+    assert tiers == [TierModelo.PEQUENO]

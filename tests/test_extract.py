@@ -15,7 +15,7 @@ from src.schemas import (
     TierModelo,
     Transacao,
 )
-from src.steps.extract import PROMPT_VERSION, extrair
+from src.steps.extract import PROMPT_VERSION, VERSOES_PROMPT, extrair
 
 SOLICITACAO = SolicitacaoBruta(
     id_caso="CASO-0042",
@@ -116,10 +116,26 @@ def test_payload_leva_so_o_necessario_para_a_extracao(monkeypatch):
     assert "CLI-SEGREDO-01" not in usuarios[0]
 
 
-def test_prompt_cita_todos_os_motivos_e_campos_do_schema():
-    prompt = (llm.PASTA_PROMPTS / f"{PROMPT_VERSION}.md").read_text(encoding="utf-8")
+@pytest.mark.parametrize("versao", VERSOES_PROMPT)
+def test_prompt_cita_todos_os_motivos_e_campos_do_schema(versao):
+    prompt = (llm.PASTA_PROMPTS / f"{versao}.md").read_text(encoding="utf-8")
 
     for motivo in MotivoContestacao:
         assert f"`{motivo.value}`" in prompt
     for campo in ExtracaoContestacao.model_fields:
         assert f"`{campo}`" in prompt
+
+
+def test_versoes_registradas_sao_exatamente_os_prompts_de_extracao_em_disco():
+    em_disco = sorted(p.stem for p in llm.PASTA_PROMPTS.glob("extract_v*.md"))
+
+    assert sorted(VERSOES_PROMPT) == em_disco
+    assert PROMPT_VERSION == "extract_v2"
+
+
+def test_versao_desconhecida_falha_antes_de_chamar_o_modelo(monkeypatch):
+    usuarios = _provedor_falso(monkeypatch)
+
+    with pytest.raises(ValueError, match="prompt de extracao desconhecido"):
+        extrair(SOLICITACAO, TierModelo.PEQUENO, "extract_v9")
+    assert usuarios == []

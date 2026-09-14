@@ -17,6 +17,7 @@ from src.schemas import (
     StatusExecucao,
     TierModelo,
 )
+from src.steps.extract import PROMPT_VERSION
 
 AGORA = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
 
@@ -142,8 +143,8 @@ def test_tier_forcado_grava_todos_os_casos_nele_sem_escalar(monkeypatch, cache):
     gravacao = run.preencher_cache(CASOS[:2], [TierModelo.MEDIO])
 
     assert _chaves(cache) == [
-        ("CASO-0001", "extract_v1", "medio"),
-        ("CASO-0002", "extract_v1", "medio"),
+        ("CASO-0001", PROMPT_VERSION, "medio"),
+        ("CASO-0002", PROMPT_VERSION, "medio"),
     ]
     assert len(chamadas) == 2
     assert gravacao.gravadas == {TierModelo.MEDIO: 2}
@@ -214,4 +215,32 @@ def test_record_sem_tier_usa_pequeno(monkeypatch, tmp_path, cache):
 
     run.main()
 
+    assert _chaves(cache) == [("CASO-0001", PROMPT_VERSION, "pequeno")]
+
+
+def test_record_com_prompt_antigo_grava_na_chave_dessa_versao(monkeypatch, cache):
+    _provedor(monkeypatch, lambda spec, id_caso: EXTRACAO_BAIXA)
+
+    run.preencher_cache(CASOS[:1], [TierModelo.PEQUENO], "extract_v1")
+
     assert _chaves(cache) == [("CASO-0001", "extract_v1", "pequeno")]
+    assert run.respostas_gravadas(cache, "extract_v1") == 1
+    assert run.respostas_gravadas(cache, PROMPT_VERSION) == 0
+
+
+def test_mock_sem_respostas_da_versao_pedida_para_antes_de_processar(
+    monkeypatch, tmp_path, cache
+):
+    casos = tmp_path / "casos.jsonl"
+    casos.write_text(CASOS[0].model_dump_json() + "\n", encoding="utf-8")
+    _provedor(monkeypatch, lambda spec, id_caso: EXTRACAO_BAIXA)
+    run.preencher_cache(CASOS[:1], [TierModelo.PEQUENO], "extract_v1")
+    monkeypatch.setattr(llm, "CACHE_PADRAO", cache)
+    monkeypatch.setattr(
+        sys, "argv", ["run.py", "--mock", "--casos", str(casos), "--prompt", "extract_v2"]
+    )
+
+    with pytest.raises(SystemExit) as saida:
+        run.main()
+
+    assert "nao tem respostas de extract_v2" in str(saida.value.code)

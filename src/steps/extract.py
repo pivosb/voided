@@ -23,7 +23,10 @@ from src.schemas import (
     Valor,
 )
 
-PROMPT_VERSION = "extract_v1"
+# Versao vigente. As anteriores ficam para replay do cache e comparacao offline:
+# a versao faz parte da chave do cache, entao trocar o texto exige versao nova.
+VERSOES_PROMPT = ("extract_v1", "extract_v2")
+PROMPT_VERSION = VERSOES_PROMPT[-1]
 
 
 class TransacaoNoPrompt(Base):
@@ -46,8 +49,10 @@ class EntradaExtracao(Base):
 
 
 def extrair(
-    solicitacao: SolicitacaoBruta, tier: TierModelo
+    solicitacao: SolicitacaoBruta, tier: TierModelo, prompt_version: str = PROMPT_VERSION
 ) -> tuple[ExtracaoContestacao, CustoChamada]:
+    if prompt_version not in VERSOES_PROMPT:
+        raise ValueError(f"prompt de extracao desconhecido: {prompt_version!r}")
     campos = set(TransacaoNoPrompt.model_fields)
     payload = EntradaExtracao(
         id_caso=solicitacao.id_caso,
@@ -59,4 +64,4 @@ def extrair(
             for t in solicitacao.transacoes_periodo
         ],
     )
-    return llm.complete_structured(PROMPT_VERSION, payload, ExtracaoContestacao, tier)
+    return llm.complete_structured(prompt_version, payload, ExtracaoContestacao, tier)

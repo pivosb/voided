@@ -54,6 +54,7 @@ class Estado(str, Enum):
 @dataclass
 class _Caso:
     solicitacao: SolicitacaoBruta
+    prompt_version: str
     tentativas: int = 0
     rotas: list[DecisaoRoteamento] = field(default_factory=list)
     custos: list[CustoChamada] = field(default_factory=list)
@@ -65,9 +66,11 @@ class _Caso:
     erro: str | None = None
 
 
-def processar_caso(solicitacao: SolicitacaoBruta) -> EventoExecucao:
+def processar_caso(
+    solicitacao: SolicitacaoBruta, prompt_version: str = PROMPT_VERSION
+) -> EventoExecucao:
     iniciado_em = _agora()
-    caso = _Caso(solicitacao)
+    caso = _Caso(solicitacao, prompt_version)
     estado = Estado.EXTRACAO
 
     try:
@@ -81,7 +84,7 @@ def processar_caso(solicitacao: SolicitacaoBruta) -> EventoExecucao:
     return EventoExecucao(
         id_caso=solicitacao.id_caso,
         versao_pipeline=VERSAO_PIPELINE,
-        versao_prompt=PROMPT_VERSION,
+        versao_prompt=prompt_version,
         iniciado_em=iniciado_em,
         finalizado_em=_agora(),
         status=caso.status,
@@ -99,7 +102,7 @@ def _extracao(caso: _Caso) -> Estado:
     tier = caso.rotas[-1].tier
     caso.tentativas += 1
     try:
-        extracao, custo = extrair(caso.solicitacao, tier)
+        extracao, custo = extrair(caso.solicitacao, tier, caso.prompt_version)
     except FalhaSchema as exc:
         caso.custos.append(exc.custo)
         falha_schema, confianca = True, None

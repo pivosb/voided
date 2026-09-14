@@ -2,8 +2,8 @@
 Executa o pipeline sobre os casos sinteticos, ou preenche o cache do LLM.
 
 Uso:
-    python run.py --mock   [--limit N] [--split dev|eval|todos] [--out ...]
-    python run.py --record [--tier pequeno|medio|grande|todos] [--limit N] [--split ...]
+    python run.py --mock   [--prompt extract_vN] [--limit N] [--split dev|eval|todos] [--out ...]
+    python run.py --record [--prompt extract_vN] [--tier pequeno|medio|grande|todos] [--limit N]
 
 --mock   roda a maquina de estados reproduzindo data/llm_cache.jsonl, sem chave e
          sem rede, e grava um EventoExecucao por caso.
@@ -12,6 +12,8 @@ Uso:
          --tier todos o cache cobre qualquer caminho do roteador, o que permite
          avaliar politicas de roteamento offline. So' com o padrao (pequeno), um
          --mock depois da ERRO nos casos que o roteador escalaria.
+--prompt versao do prompt de extracao (padrao: a vigente). Versao antiga continua
+         reproduzivel pelo cache, o que permite comparar versoes nos mesmos casos.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from src import llm, telemetry
 from src.llm import FalhaSchema
 from src.orchestrator import processar_caso
 from src.schemas import EventoExecucao, SolicitacaoBruta, StatusExecucao, TierModelo
-from src.steps.extract import extrair
+from src.steps.extract import PROMPT_VERSION, VERSOES_PROMPT, extrair
 
 RAIZ = Path(__file__).resolve().parent
 CASOS_PADRAO = RAIZ / "data" / "synthetic_cases.jsonl"
@@ -114,7 +116,16 @@ class Gravacao:
     falhas: list[str] = field(default_factory=list)
 
 
-def preencher_cache(casos: list[SolicitacaoBruta], tiers: list[TierModelo]) -> Gravacao:
+def respostas_gravadas(caminho: Path, prompt_version: str) -> int:
+    with caminho.open(encoding="utf-8") as fh:
+        return sum(
+            json.loads(linha)["prompt_version"] == prompt_version for linha in fh if linha.strip()
+        )
+
+
+def preencher_cache(
+    casos: list[SolicitacaoBruta], tiers: list[TierModelo], prompt_version: str = PROMPT_VERSION
+) -> Gravacao:
     """Extrai cada caso em cada tier, na ordem dos tiers, sem roteador.
 
     O que fica e' o cache: resposta fora do schema tambem foi gravada pelo llm e
@@ -127,7 +138,7 @@ def preencher_cache(casos: list[SolicitacaoBruta], tiers: list[TierModelo]) -> G
         for solicitacao in casos:
             numero += 1
             try:
-                extrair(solicitacao, tier)
+                extrair(solicitacao, tier, prompt_version)
                 resultado = "gravada"
             except FalhaSchema:
                 gravacao.fora_do_schema[tier] += 1
@@ -159,6 +170,7 @@ def main() -> None:
     modo = ap.add_mutually_exclusive_group(required=True)
     modo.add_argument("--mock", action="store_true", help="reproduz data/llm_cache.jsonl")
     modo.add_argument("--record", action="store_true", help="chama a API e grava o cache")
+    ap.add_argument("--prompt", choices=VERSOES_PROMPT, default=PROMPT_VERSION)
     ap.add_argument("--tier", choices=list(TIERS_RECORD), default=None,
                     help="so' com --record; padrao pequeno")
     ap.add_argument("--limit", type=int, default=None)
@@ -177,6 +189,11 @@ def main() -> None:
         sys.exit(f"{args.casos} nao existe; gere com python scripts/gen_texts.py")
     if args.mock and not llm.CACHE_PADRAO.exists():
         sys.exit(f"{llm.CACHE_PADRAO} nao existe; grave com python run.py --record --tier todos")
+    if args.mock and respostas_gravadas(llm.CACHE_PADRAO, args.prompt) == 0:
+        sys.exit(
+            f"{llm.CACHE_PADRAO} nao tem respostas de {args.prompt}; grave com "
+            f"python run.py --record --tier todos --prompt {args.prompt}"
+        )
 
     llm.configurar("mock" if args.mock else "real", llm.CACHE_PADRAO)
     splits = carregar_splits(SPECS_PADRAO) if args.split != "todos" else {}
@@ -184,20 +201,23 @@ def main() -> None:
 
     if args.record:
         tiers = TIERS_RECORD[args.tier or "pequeno"]
-        gravacao = preencher_cache(casos, tiers)
-        print(f"\n{len(casos)} casos (record, split {args.split}) -> {llm.CACHE_PADRAO}")
+        gravacao = preencher_cache(casos, tiers, args.prompt)
+        print(
+            f"\n{len(casos)} casos (record, {args.prompt}, split {args.split}) "
+            f"-> {llm.CACHE_PADRAO}"
+        )
         print("\n".join(resumo_gravacao(gravacao, tiers)))
         return
 
     out = args.out or OUT_PADRAO
     eventos = []
     for numero, solicitacao in enumerate(casos, start=1):
-        evento = processar_caso(solicitacao)
+        evento = processar_caso(solicitacao, args.prompt)
         telemetry.gravar(evento, out)
         eventos.append(evento)
         print(f"[{numero}/{len(casos)}] {evento.id_caso} {evento.status.value}", flush=True)
 
-    print(f"\n{len(eventos)} casos (mock, split {args.split}) -> {out}")
+    print(f"\n{len(eventos)} casos (mock, {args.prompt}, split {args.split}) -> {out}")
     print("\n".join(resumo(eventos)))
 
 
