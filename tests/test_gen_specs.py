@@ -44,3 +44,18 @@ def test_gabarito_concorda_com_a_validacao(seed):
             )
 
     assert divergencias == []
+
+
+def test_texto_vago_com_valor_divergente_nao_tem_base_para_estorno_parcial():
+    rng = random.Random(20260913)
+    for indice in range(1, 5000):
+        spec = gerar_spec(rng, indice, RECEBIDA_BASE + timedelta(days=indice % 180))
+        if spec["dificuldade"] == "texto_vago" and spec["verdade"]["motivo"] == "valor_divergente":
+            break
+    else:
+        raise AssertionError("gerador nao produziu texto_vago com valor_divergente")
+
+    verdade = spec["verdade"]
+    assert verdade["valor_alegado"] is None
+    assert "estorno_parcial_sem_base" in verdade["violacoes_esperadas"]
+    assert verdade["elegivel_esperado"] is False

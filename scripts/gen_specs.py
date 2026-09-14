@@ -236,11 +236,13 @@ def gerar_spec(rng: random.Random, indice: int, recebida_em: datetime) -> dict:
     total_contestado = sum((t.valor for t in contestadas), Decimal("0.00"))
     if dificuldade == "valor_nao_bate":
         valor_alegado = (total_contestado + dinheiro(rng, 12, 90)).quantize(Decimal("0.01"))
+    elif dificuldade == "texto_vago":
+        # Vem antes de valor_divergente: texto vago nao cita valor, entao nao ha
+        # valor alegado para extrair, nem base para estorno parcial.
+        valor_alegado = None
     elif motivo is MotivoContestacao.VALOR_DIVERGENTE:
         valor_alegado = (total_contestado - dinheiro(rng, 5, 60)).quantize(Decimal("0.01"))
         valor_alegado = max(valor_alegado, Decimal("1.00"))
-    elif dificuldade == "texto_vago":
-        valor_alegado = None
     else:
         valor_alegado = total_contestado
 
@@ -251,12 +253,12 @@ def gerar_spec(rng: random.Random, indice: int, recebida_em: datetime) -> dict:
 
     if motivo is MotivoContestacao.INDETERMINADO:
         violacoes_esperadas.append(RegraViolacao.MOTIVO_INDETERMINADO)
-    if dificuldade == "valor_nao_bate":
-        violacoes_esperadas.append(
-            RegraViolacao.ESTORNO_PARCIAL_SEM_BASE
-            if motivo is MotivoContestacao.VALOR_DIVERGENTE
-            else RegraViolacao.VALOR_ALEGADO_DIVERGENTE
-        )
+    if motivo is MotivoContestacao.VALOR_DIVERGENTE and (
+        dificuldade == "valor_nao_bate" or valor_alegado is None
+    ):
+        violacoes_esperadas.append(RegraViolacao.ESTORNO_PARCIAL_SEM_BASE)
+    elif dificuldade == "valor_nao_bate":
+        violacoes_esperadas.append(RegraViolacao.VALOR_ALEGADO_DIVERGENTE)
     if cliente_afirma_nao_autorizou and any(
         t.canal_transacao == "presencial" for t in contestadas
     ):
