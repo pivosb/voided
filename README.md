@@ -132,12 +132,78 @@ A tabela abaixo lista as regras e a severidade de cada uma:
 | Mais de 3 contestações em 12 meses | alerta |
 | Transação com data posterior à solicitação | alerta |
 
-
-### Integração com ferramentas/APIs
-
-Em produção, o pipeline seria dependente de ferramenta interna da instituição financeira que buscasse as transações em banco de dados.
-Para testes da implementação, casos sintéticos foram gerados simulando a atuação do buscador de transações.
-As chaves de API ficam só no .env, que não é versionado (modelo em .env.example). Em produção viriam de um cofre de segredos.
+### 1.3 Cálculo (determinístico)
+ 
+Com a extração aceita e as transações confirmadas pela validação, o cálculo produz um
+`ResultadoCalculo` sem nenhuma chamada a modelo, sem I/O e sem relógio — o instante do
+registro é injetado de fora, o que mantém o módulo testável e reprodutível. A entrada é a
+lista de transações confirmadas na base, não os valores alegados pelo cliente: o relato pode
+divergir do extrato, e nesse caso o estorno sai da base e a divergência vira alerta.
+ 
+O valor do estorno depende do motivo:
+ 
+| Motivo | Valor estornado |
+|---|---|
+| `valor_divergente` | diferença entre o cobrado e o valor devido informado pelo cliente (estorno parcial) |
+| `duplicidade` | apenas o excedente: de cada grupo de cobranças iguais, uma permanece |
+| demais motivos | soma integral das transações confirmadas |
+ 
+Na duplicidade, o grupo de cobranças repetidas é formado sobre o período inteiro, não apenas
+sobre as transações citadas. Um cliente que cita só a segunda cobrança de um par recebe essa
+de volta; uma transação citada sem par no período não é repetição e não entra no cálculo.
+ 
+A provisão é integral sobre o valor do estorno. O prazo de resposta é fixo em 5 dias úteis. A
+faixa de risco é alta quando o estorno ultrapassa o limite de automação de R$ 1.000,00 ou
+quando a validação emitiu alerta de compra presencial contra alegação de não reconhecimento ou
+de reincidência de contestações; é média quando há qualquer outro alerta; e baixa quando não
+há alerta e o valor está dentro do limite. Faixa alta encerra o caso na fila humana, sem
+registro automático, e é o analista quem define a provisão final.
+ 
+Três decisões que valem destacar:
+ 
+- **Arredondamento declarado e centralizado.** Valores monetários são `Decimal`, nunca
+  `float`, e todo valor que sai do módulo passa por um único ponto de quantização em duas
+  casas com `ROUND_HALF_EVEN` (arredondamento bancário, ABNT NBR 5891). Meio centavo exato vai
+  para o par, então arredondar em volume não acumula viés para nenhum lado. Hoje as operações
+  são só somas e subtrações de valores que já têm duas casas, e o quantize apenas normaliza a
+  escala; ele está no caminho para que uma operação futura que gere casas extras (juros,
+  câmbio, rateio) já nasça sob a mesma política.
+- **Invariante verificada em tempo de execução.** O estorno nunca pode exceder a soma das
+  transações confirmadas. A checagem é um `if` que levanta exceção, não um `assert`, porque
+  `python -O` removeria o `assert` e esta é a última barreira antes de um efeito financeiro.
+- **Entrada insuficiente não produz número.** Caso não elegível, transação confirmada ausente
+  do período, estorno parcial sem cobrança a maior e duplicidade sem cobrança repetida levantam
+  exceção em vez de devolver um valor. Não existe número defensável nesses casos, e inventar
+  um seria pior que falhar.
+A `memoria_calculo` guarda o passo a passo legível de cada operação: os valores das
+transações, a soma com as parcelas, a fórmula do estorno, a verificação da invariante, a faixa
+de risco com o motivo e o prazo. É exigência de auditoria, não enfeite — um analista precisa
+conseguir refazer a conta à mão.
+ 
+### 1.4 Registro
+ 
+O registro só ocorre para casos que chegaram ao fim sem escalada para humano; qualquer outro
+status levanta exceção em vez de registrar. O `RegistroCaso` guarda o protocolo, o instante do
+registro, o status e a resposta ao cliente, com `aprovado_por` nulo quando a decisão foi
+automática e preenchido quando houve aprovação humana.
+ 
+O protocolo é derivado de um hash determinístico do `id_caso`. Reprocessar o mesmo caso produz
+o mesmo protocolo em vez de abrir um segundo registro, e essa é a base da idempotência: numa
+integração real, é o protocolo que serviria de chave para impedir estorno em duplicidade.
+ 
+A resposta ao cliente sai de template, sem LLM. Redigir com modelo de linguagem seria
+defensável aqui, já que é a única etapa cuja saída é texto para leitura humana, mas custaria
+uma chamada por caso e abriria espaço para o modelo afirmar algo que a decisão não sustenta. O
+template é mais barato, auditável e suficiente.
+ 
+### 1.5 Integração com ferramentas/APIs
+ 
+Em produção, o pipeline dependeria de ferramenta interna da instituição financeira que
+buscasse as transações em banco de dados. Para testes da implementação, casos sintéticos foram
+gerados simulando a atuação do buscador de transações.
+ 
+As chaves de API ficam só no `.env`, que não é versionado (modelo em `.env.example`). Em
+produção viriam de um cofre de segredos.
 
 
 ## 2. Uso de modelos: quando SLM, quando escalar

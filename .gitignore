@@ -13,6 +13,7 @@ env/
 # Editor
 .vscode/
 .idea/
+CLAUDE.md
 
 # Saidas de execucao (o log de exemplo vai versionado em data/, nao aqui)
 outputs/
