@@ -12,9 +12,9 @@ registrada e' violacao perdida.
 
 from __future__ import annotations
 
-from datetime import timedelta
 from decimal import Decimal
 
+from src.duplicidade import JANELA_DUPLICIDADE_HORAS, grupos_repetidos
 from src.schemas import (
     ExtracaoContestacao,
     MotivoContestacao,
@@ -28,10 +28,6 @@ from src.schemas import (
 
 # Janela da bandeira para abertura de contestacao, contada em dias de calendario.
 PRAZO_CONTESTACAO_DIAS = 120
-
-# Duas cobrancas do mesmo valor no mesmo estabelecimento dentro desta janela
-# caracterizam o par que sustenta a alegacao de duplicidade.
-JANELA_DUPLICIDADE_HORAS = 24
 
 # Acima disso o historico do cliente vira sinal de risco para o calculo.
 LIMITE_CONTESTACOES_12M = 3
@@ -53,7 +49,7 @@ def validar(
 
     violacoes += _regra_prazo(solicitacao, confirmadas)
     violacoes += _regra_ja_estornada(confirmadas)
-    violacoes += _regra_duplicidade(solicitacao, extracao)
+    violacoes += _regra_duplicidade(solicitacao, extracao, confirmadas)
     violacoes += _regra_valor_alegado(extracao, confirmadas)
     violacoes += _regra_estorno_parcial_sem_base(extracao, confirmadas)
     violacoes += _regra_motivo_indeterminado(extracao)
@@ -153,12 +149,18 @@ def _regra_ja_estornada(confirmadas: list[Transacao]) -> list[Violacao]:
 
 
 def _regra_duplicidade(
-    solicitacao: SolicitacaoBruta, extracao: ExtracaoContestacao
+    solicitacao: SolicitacaoBruta,
+    extracao: ExtracaoContestacao,
+    confirmadas: list[Transacao],
 ) -> list[Violacao]:
-    if extracao.motivo is not MotivoContestacao.DUPLICIDADE:
+    if extracao.motivo is not MotivoContestacao.DUPLICIDADE or not confirmadas:
         return []
 
-    if _existe_par_duplicado(solicitacao.transacoes_periodo):
+    # A transacao citada tem de estar num grupo repetido. Par em outro ponto do
+    # periodo nao basta: o calculo so' devolve cobranca repetida que foi citada.
+    grupos = grupos_repetidos(solicitacao.transacoes_periodo)
+    repetidas = {t.id_transacao for grupo in grupos for t in grupo}
+    if any(t.id_transacao in repetidas for t in confirmadas):
         return []
 
     return [
@@ -166,27 +168,12 @@ def _regra_duplicidade(
             regra=RegraViolacao.DUPLICIDADE_NAO_CONFIRMADA,
             severidade=Severidade.BLOQUEANTE,
             detalhe=(
-                "Cliente alega cobranca em duplicidade, mas o periodo nao tem duas "
-                "transacoes de mesmo estabelecimento e mesmo valor em ate "
-                f"{JANELA_DUPLICIDADE_HORAS}h."
+                "Cliente alega cobranca em duplicidade, mas nenhuma transacao citada "
+                "tem outra de mesmo estabelecimento e mesmo valor em ate "
+                f"{JANELA_DUPLICIDADE_HORAS}h no periodo."
             ),
         )
     ]
-
-
-def _existe_par_duplicado(transacoes: list[Transacao]) -> bool:
-    janela = timedelta(hours=JANELA_DUPLICIDADE_HORAS)
-
-    for i, primeira in enumerate(transacoes):
-        for segunda in transacoes[i + 1 :]:
-            if (
-                primeira.estabelecimento == segunda.estabelecimento
-                and primeira.valor == segunda.valor
-                and abs(primeira.data_hora - segunda.data_hora) <= janela
-            ):
-                return True
-
-    return False
 
 
 def _regra_valor_alegado(

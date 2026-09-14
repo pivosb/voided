@@ -186,6 +186,21 @@ def test_duplicidade_sem_par_bloqueia():
     assert _regras(resultado) == {RegraViolacao.DUPLICIDADE_NAO_CONFIRMADA}
 
 
+def test_duplicidade_citando_transacao_sem_par_bloqueia_mesmo_com_par_no_periodo():
+    # O calculo so' devolve cobranca repetida citada; par em outro ponto nao sustenta.
+    avulsa = _transacao(id_transacao="TX1", estabelecimento="LOJA B")
+    primeira = _transacao(id_transacao="TX2")
+    segunda = _transacao(id_transacao="TX3", data_hora=primeira.data_hora + timedelta(hours=1))
+
+    resultado = validar(
+        _solicitacao([avulsa, primeira, segunda]),
+        _extracao(motivo=MotivoContestacao.DUPLICIDADE, ids_transacoes_citadas=("TX1",)),
+    )
+
+    assert not resultado.elegivel
+    assert _regras(resultado) == {RegraViolacao.DUPLICIDADE_NAO_CONFIRMADA}
+
+
 def test_par_duplicado_no_limite_da_janela_conta():
     primeira = _transacao(id_transacao="TX1")
     segunda = _transacao(

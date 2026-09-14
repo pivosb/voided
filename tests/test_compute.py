@@ -284,3 +284,64 @@ def test_transacao_confirmada_ausente_do_periodo_falha():
             _extracao(["TX9"]),
             _validacao(["TX9"]),
         )
+
+
+# --- duplicidade ----------------------------------------------------------- #
+
+
+def _cobranca(id_transacao: str, horas: float, valor: str = "3430.06", loja: str = "VOEJA") -> Transacao:
+    return Transacao(
+        id_transacao=id_transacao,
+        data_hora=RECEBIDA_EM - timedelta(days=10) + timedelta(hours=horas),
+        valor=Decimal(valor),
+        estabelecimento=loja,
+        mcc="4511",
+        canal_transacao="online",
+        pais="BR",
+    )
+
+
+def _calcular_duplicidade(periodo: list[Transacao], citadas: list[str]) -> ResultadoCalculo:
+    return calcular(
+        _solicitacao(periodo),
+        _extracao(citadas, motivo=MotivoContestacao.DUPLICIDADE),
+        _validacao(citadas),
+    )
+
+
+def test_duplicidade_com_o_par_citado_devolve_so_a_cobranca_repetida():
+    # Caso que motivou a regra: estornar as duas deixava a compra de graca.
+    periodo = [_cobranca("TX1", 0), _cobranca("TX2", 0.25)]
+
+    resultado = _calcular_duplicidade(periodo, ["TX1", "TX2"])
+
+    assert resultado.valor_estorno == Decimal("3430.06")
+    assert (
+        "Estorno de duplicidade (uma cobranca de cada grupo fica): TX1, TX2: 2 cobrancas "
+        "de R$ 3430.06, 2 citada(s), 1 devolvida(s) = R$ 3430.06; total R$ 3430.06"
+    ) in resultado.memoria_calculo
+
+
+def test_duplicidade_citando_so_a_segunda_cobranca_devolve_essa():
+    periodo = [_cobranca("TX1", 0), _cobranca("TX2", 1)]
+
+    assert _calcular_duplicidade(periodo, ["TX2"]).valor_estorno == Decimal("3430.06")
+
+
+def test_tres_cobrancas_iguais_devolvem_duas():
+    periodo = [_cobranca("TX1", 0, "19.99"), _cobranca("TX2", 20, "19.99"), _cobranca("TX3", 40, "19.99")]
+
+    assert _calcular_duplicidade(periodo, ["TX1", "TX2", "TX3"]).valor_estorno == Decimal("39.98")
+
+
+def test_citada_sem_cobranca_igual_nao_entra_no_estorno_de_duplicidade():
+    periodo = [_cobranca("TX1", 0, "50.00"), _cobranca("TX2", 1, "50.00"), _cobranca("TX3", 2, "80.00", "OUTRA")]
+
+    assert _calcular_duplicidade(periodo, ["TX1", "TX2", "TX3"]).valor_estorno == Decimal("50.00")
+
+
+def test_duplicidade_sem_cobranca_repetida_citada_falha():
+    periodo = [_cobranca("TX1", 0), _cobranca("TX2", 25)]
+
+    with pytest.raises(ValueError, match="sem cobranca repetida"):
+        _calcular_duplicidade(periodo, ["TX1", "TX2"])

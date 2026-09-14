@@ -24,6 +24,7 @@ from __future__ import annotations
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Literal
 
+from src.duplicidade import grupos_repetidos
 from src.schemas import (
     ExtracaoContestacao,
     MotivoContestacao,
@@ -67,8 +68,9 @@ def calcular(
     """Calcula o estorno de um caso elegivel e registra a memoria de calculo.
 
     Levanta ValueError quando a entrada nao sustenta um calculo: caso nao
-    elegivel, transacao confirmada ausente do periodo, ou estorno parcial sem
-    cobranca a maior. Nesses casos nao ha numero defensavel para devolver.
+    elegivel, transacao confirmada ausente do periodo, estorno parcial sem
+    cobranca a maior, ou duplicidade sem cobranca repetida citada. Nesses casos
+    nao ha numero defensavel para devolver.
     """
     if not validacao.elegivel:
         raise ValueError(
@@ -82,7 +84,7 @@ def calcular(
     parcelas = " + ".join(_brl(t.valor) for t in confirmadas)
     memoria.append(f"Soma das confirmadas: {parcelas} = {_brl(soma)}")
 
-    estorno, linha_estorno = _valor_estorno(extracao, soma)
+    estorno, linha_estorno = _valor_estorno(solicitacao, extracao, confirmadas, soma)
     memoria.append(linha_estorno)
 
     # if, nao assert: python -O removeria a checagem, e esta e' a ultima barreira
@@ -131,8 +133,14 @@ def _transacoes_confirmadas(
 
 
 def _valor_estorno(
-    extracao: ExtracaoContestacao, soma: Decimal
+    solicitacao: SolicitacaoBruta,
+    extracao: ExtracaoContestacao,
+    confirmadas: list[Transacao],
+    soma: Decimal,
 ) -> tuple[Decimal, str]:
+    if extracao.motivo is MotivoContestacao.DUPLICIDADE:
+        return _estorno_duplicidade(solicitacao, confirmadas)
+
     if extracao.motivo is not MotivoContestacao.VALOR_DIVERGENTE:
         return soma, f"Estorno integral: {_brl(soma)}"
 
@@ -151,6 +159,44 @@ def _valor_estorno(
     estorno = quantizar_centavos(soma - devido)
     return estorno, (
         f"Estorno parcial: cobrado {_brl(soma)} - devido {_brl(devido)} = {_brl(estorno)}"
+    )
+
+
+def _estorno_duplicidade(
+    solicitacao: SolicitacaoBruta, confirmadas: list[Transacao]
+) -> tuple[Decimal, str]:
+    """Devolve so' o excedente: de cada grupo de cobrancas iguais, uma fica.
+
+    O grupo vem do periodo inteiro, nao so' das citadas: cliente que cita apenas a
+    segunda cobranca de um par recebe essa de volta. Citada sem cobranca igual no
+    periodo nao e' repeticao e nao entra.
+    """
+    citadas = {t.id_transacao for t in confirmadas}
+    estorno = Decimal("0")
+    partes: list[str] = []
+
+    for grupo in grupos_repetidos(solicitacao.transacoes_periodo):
+        n_citadas = sum(t.id_transacao in citadas for t in grupo)
+        devolvidas = min(n_citadas, len(grupo) - 1)
+        if devolvidas == 0:
+            continue
+        valor = quantizar_centavos(grupo[0].valor * devolvidas)
+        estorno += valor
+        ids = ", ".join(t.id_transacao for t in grupo)
+        partes.append(
+            f"{ids}: {len(grupo)} cobrancas de {_brl(grupo[0].valor)}, "
+            f"{n_citadas} citada(s), {devolvidas} devolvida(s) = {_brl(valor)}"
+        )
+
+    if estorno == 0:
+        raise ValueError(
+            "Duplicidade sem cobranca repetida entre as confirmadas: nao ha excedente para estornar."
+        )
+
+    estorno = quantizar_centavos(estorno)
+    return estorno, (
+        f"Estorno de duplicidade (uma cobranca de cada grupo fica): {'; '.join(partes)}; "
+        f"total {_brl(estorno)}"
     )
 
 
