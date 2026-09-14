@@ -8,9 +8,10 @@ coleta da solicitação, validação de elegibilidade, cálculo do estorno e reg
 ## Como rodar
 
 ```bash
+git clone https://github.com/pivosb/voided.git && cd voided
 mamba env create -f environment.yml
 mamba activate voided
-python run.py --mock    # execução completa, sem chave de API
+python run.py --mock                # execução completa, sem chave de API
 pytest -q                           # testes das regras, do cálculo e do pipeline
 jupyter lab notebooks/analise.ipynb # métricas e decisões
 ```
