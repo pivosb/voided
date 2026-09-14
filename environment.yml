@@ -14,4 +14,5 @@ dependencies:
       - pydantic>=2.7
       - python-dotenv
       - tenacity           # retry com backoff no cliente LLM
-      - anthropic          # trocar/adicionar conforme o provedor usado
+      - anthropic
+      - openai             # tambem cobre servidor local compativel (Ollama, vLLM)

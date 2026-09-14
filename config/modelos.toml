@@ -1,0 +1,47 @@
+# Modelo concreto de cada tier e do gerador de dados sinteticos.
+# Chaves de API ficam so' no .env, nunca aqui.
+# Precos em US$ por milhao de tokens, consultados na data abaixo.
+data_consulta = "2026-09-13"
+
+# O gerador nao pode ser da mesma familia de nenhum tier: texto escrito no estilo
+# do proprio extrator infla a acuracia medida. true aceita, com warning.
+permitir_mesma_familia = false
+
+[gerador]
+provedor = "openai"
+modelo = "gemini-3.8-flash"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# Gemini 3 raciocina por padrao e o raciocinio consome max_tokens; este modelo
+# recusa minimal, entao low e' o piso.
+reasoning_effort = "low"
+
+[tiers.pequeno]
+# Gemma 4 e' modelo aberto; aqui via API por falta de GPU. Em producao seria self-hosted.
+provedor = "openai"
+modelo = "gemma-4-31b-it"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+preco_entrada_musd = 0.0
+preco_saida_musd = 0.0
+perimetro = "externo"
+
+# Modelo aberto servido dentro do perimetro por API compativel com OpenAI (Qwen).
+# provedor = "openai"
+# modelo = "qwen3:8b"
+# base_url = "http://localhost:11434/v1"
+# preco_entrada_musd = 0.0
+# preco_saida_musd = 0.0
+# perimetro = "interno"
+
+[tiers.medio]
+provedor = "anthropic"
+modelo = "claude-sonnet-5"
+preco_entrada_musd = 2.0
+preco_saida_musd = 10.0
+perimetro = "externo"
+
+[tiers.grande]
+provedor = "anthropic"
+modelo = "claude-opus-5"
+preco_entrada_musd = 5.0
+preco_saida_musd = 25.0
+perimetro = "externo"
